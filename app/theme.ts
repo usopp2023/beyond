@@ -1,0 +1,15 @@
+export const colors = {
+  bg: '#FBF1F0',
+  bgSoft: '#F5E5E4',
+  bgCard: '#FFFCFB',
+  line: '#EBD5D5',
+  lineSoft: '#F2E3E2',
+  ink: '#3A2E2F',
+  inkSoft: '#7A6566',
+  inkDim: '#A99597',
+  inkMute: '#C9B8B9',
+  rose: '#E3A4AE',
+  roseSoft: '#EFC2C9',
+  roseDeep: '#B5707C',
+  roseWash: '#F7E5E7',
+};

@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build outputs
+android/build/
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/app/.cxx/
+**/build/
+**/.gradle/
+**/.cxx/
+
+# APK / signing
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# Logs / temp
+*.log
+build.log
+metro.log
+logcat*.log
+install.log
+check-bundle.js
+screen.png
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.iml
+Thumbs.db
+local.properties
+
+# Sensitive raw materials (large binaries from prototypes)
+原始资料/*.docx

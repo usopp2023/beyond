@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(winget *)",
+      "PowerShell(npm install *)",
+      "PowerShell(eas *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(adb *)",
+      "PowerShell(adb devices *)",
+      "PowerShell(Get-PnpDevice *)",
+      "Bash(npx --yes create-expo-app@latest app --template blank-typescript)",
+      "Bash(npx expo *)",
+      "PowerShell($env:ANDROID_HOME = \"$env:LocalAppData\\\\Android\\\\Sdk\"; $env:Path = \"$env:ANDROID_HOME\\\\platform-tools;$env:Path\"; Set-Location E:\\\\sex\\\\app; npx expo run:android 2>&1)",
+      "PowerShell($env:ANDROID_HOME = \"$env:LocalAppData\\\\Android\\\\Sdk\"; $env:Path = \"$env:ANDROID_HOME\\\\platform-tools;$env:Path\"; Set-Location E:\\\\sex\\\\app\\\\android; .\\\\gradlew.bat app:assembleDebug --stacktrace 2>&1 | Select-String -Pattern \"IBM_SEMERU\",\"Caused\",\"at \" -Context 0,1 | Select-Object -First 60)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-Item *)",
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Users\\\\aa630\\\\jdk17\\\\jdk-17.0.19+10\"; $env:ANDROID_HOME = \"$env:LocalAppData\\\\Android\\\\Sdk\"; $env:Path = \"$env:JAVA_HOME\\\\bin;$env:ANDROID_HOME\\\\platform-tools;$env:Path\"; Set-Location E:\\\\sex\\\\app; npx expo run:android 2>&1)",
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Users\\\\aa630\\\\jdk17\\\\jdk-17.0.19+10\"; $env:Path = \"$env:JAVA_HOME\\\\bin;$env:Path\"; Set-Location E:\\\\sex\\\\app\\\\android; .\\\\gradlew.bat --stop 2>&1 | Select-Object -Last 5; \"---\"; \"killed daemons\")",
+      "Bash(adb devices *)",
+      "PowerShell(Tee-Object *)",
+      "PowerShell(adb shell *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(adb logcat *)",
+      "PowerShell(Out-Null *)",
+      "Bash(grep -n \"screen5\\\\|屏 5\\\\|screen-5\\\\|profile\\\\|我的\\\\|个人\" \"E:\\\\\\\\sex\\\\\\\\原始资料\\\\\\\\会回应你-AppUI-5屏.html\")",
+      "WebFetch(domain:docs.expo.dev)",
+      "WebSearch",
+      "PowerShell(npm config *)",
+      "PowerShell(adb install *)",
+      "PowerShell(adb exec-out *)",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Bash(git add *)"
+    ]
+  }
+}

@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会回应你 · Consumer App</title>
+<style>
+  :root {
+    /* 樱与奶 — 柔樱花粉 + 奶油白 + 豆沙红 */
+    --bg:#FBF1F0; --bg-soft:#F5E5E4; --bg-card:#FFFCFB;
+    --line:#EBD5D5; --line-soft:#F2E3E2;
+    --ink:#3A2E2F; --ink-soft:#7A6566; --ink-dim:#A99597; --ink-mute:#C9B8B9;
+    --rose:#E3A4AE; --rose-soft:#EFC2C9; --rose-deep:#B5707C; --rose-wash:#F7E5E7;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body {
+    background:#E4CCCD;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:flex; justify-content:center; align-items:flex-start;
+    gap:24px; padding:34px; min-height:100vh; flex-wrap:wrap;
+  }
+  .phone {
+    width:390px; height:844px;
+    border-radius:46px; overflow:hidden; position:relative;
+    box-shadow:0 0 0 11px #FFFCFB,0 0 0 12px #EBD5D5,0 40px 80px rgba(140,100,105,.3);
+    background:var(--bg);
+  }
+  .notch {
+    position:absolute; top:0; left:50%; transform:translateX(-50%);
+    width:148px; height:30px; background:#1A1714;
+    border-radius:0 0 18px 18px; z-index:200;
+  }
+  .bg-layer {
+    position:absolute; inset:0;
+    background:
+      radial-gradient(ellipse 120% 70% at 50% 8%, rgba(255,252,251,.9), transparent 55%),
+      radial-gradient(ellipse 130% 75% at 50% 110%, rgba(247,229,231,.85), transparent 60%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%);
+  }
+  .screen {
+    position:absolute; inset:0;
+    display:flex; flex-direction:column;
+    transition:opacity .55s ease;
+  }
+  .screen.hidden { opacity:0; pointer-events:none; }
+  .statusbar {
+    height:54px; flex-shrink:0;
+    display:flex; align-items:flex-end; justify-content:space-between;
+    padding:0 30px 8px; font-size:13px; color:var(--ink-soft); font-weight:600;
+    position:relative; z-index:10;
+  }
+  .eyebrow {
+    font-size:12px; color:var(--ink-dim); letter-spacing:3px;
+    font-weight:600; text-transform:uppercase;
+  }
+  .headline {
+    font-size:27px; color:var(--ink); font-weight:300;
+    letter-spacing:.5px; line-height:1.4;
+  }
+  .headline b { font-weight:600; color:var(--rose-deep); }
+  .wave-wrap {
+    flex:1; display:flex; align-items:center; justify-content:center;
+    position:relative; z-index:5;
+  }
+  canvas.wave { display:block; }
+  .btn-primary {
+    width:100%; padding:18px;
+    border:none; border-radius:20px; cursor:pointer;
+    font-family:inherit; font-size:15px; font-weight:600;
+    letter-spacing:2px; color:#FFFCFB;
+    background:linear-gradient(135deg, var(--rose-soft), var(--rose));
+    box-shadow:0 10px 28px rgba(201,139,122,.32);
+    transition:transform .15s;
+  }
+  .btn-primary:active { transform:scale(.97); }
+  .btn-ghost {
+    width:100%; padding:16px;
+    border:1px solid var(--line); border-radius:20px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:500;
+    letter-spacing:2px; color:var(--ink-soft);
+    background:var(--bg-card);
+    transition:transform .15s;
+  }
+  .btn-ghost:active { transform:scale(.97); }
+
+  /* 屏 1 开屏 */
+  #screenSplash {
+    cursor:pointer;
+  }
+  .splash-center {
+    flex:1; display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    padding:0 24px; position:relative; z-index:5;
+  }
+  .splash-headline {
+    font-size:38px; color:var(--ink); font-weight:300;
+    letter-spacing:1.5px; line-height:1.4; text-align:center;
+  }
+  .splash-headline b { font-weight:600; color:var(--rose-deep); }
+  .splash-brand {
+    font-size:12px; color:var(--ink-dim); letter-spacing:4px;
+    font-weight:600; text-transform:uppercase; margin-top:22px;
+  }
+  .splash-hint {
+    flex-shrink:0; text-align:center; padding-bottom:48px;
+    font-size:12px; color:var(--ink-mute); letter-spacing:2px;
+    position:relative; z-index:5;
+  }
+
+  /* 屏 2 连接 */
+  #screenConnect .content,
+  #screenConnectedDemo .content {
+    flex:1; display:flex; flex-direction:column;
+    padding:0 32px; position:relative; z-index:5;
+  }
+  .connect-hero { padding-top:30px; margin-bottom:26px; }
+  .connect-hero .eyebrow {
+    font-size:12px; color:var(--ink-dim); letter-spacing:3px;
+    font-weight:600; text-transform:uppercase;
+  }
+  .connect-title {
+    font-size:26px; color:var(--ink); font-weight:300;
+    letter-spacing:1px; margin-top:14px;
+  }
+  .connect-sub {
+    font-size:13px; color:var(--ink-dim); letter-spacing:1px;
+    margin-top:8px;
+  }
+  .dev-list { margin-bottom:8px; }
+  .dev-list-label {
+    font-size:11px; color:var(--ink-dim); letter-spacing:1.5px;
+    text-transform:uppercase; font-weight:600; margin-bottom:12px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .scan-dot {
+    width:6px; height:6px; border-radius:50%; background:var(--rose);
+    animation:scanpulse 1.4s ease-in-out infinite;
+  }
+  .scan-dot.still { animation:none; opacity:1; }
+  @keyframes scanpulse { 0%,100% { opacity:.3; } 50% { opacity:1; } }
+  .dev-row {
+    background:var(--bg-card); border:1px solid var(--line);
+    border-radius:18px; padding:16px 18px; margin-bottom:10px;
+    display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer; transition:all .2s;
+  }
+  .dev-row:active { transform:scale(.98); border-color:var(--rose-soft); }
+  .dev-row.connected {
+    border-color:var(--rose-soft);
+    background:var(--rose-wash);
+    cursor:default;
+  }
+  .dev-row .dev-name { font-size:15px; color:var(--ink); font-weight:600; }
+  .dev-row .dev-sub { font-size:11px; color:var(--ink-dim); margin-top:3px; }
+  .dev-row .dev-go { font-size:13px; color:var(--rose); font-weight:600; }
+  .dev-row .dev-go.connected { color:var(--rose-deep); }
+  /* 连接后才出现的"轻触开始"区 */
+  .ready-zone {
+    margin-top:8px;
+  }
+  .settings-link {
+    text-align:center; margin-top:16px;
+    font-size:12px; color:var(--ink-dim); letter-spacing:1.5px;
+    cursor:pointer;
+  }
+  .privacy-note {
+    text-align:center; font-size:11px; color:var(--ink-dim);
+    line-height:1.7; padding:14px 10px 0;
+  }
+  .tabbar {
+    flex-shrink:0; display:flex; justify-content:space-around;
+    padding:14px 20px 30px; border-top:1px solid var(--line-soft);
+    background:var(--bg-card); position:relative; z-index:10;
+  }
+  .tab {
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    cursor:pointer; padding:4px 16px;
+  }
+  .tab .tab-ico { font-size:18px; opacity:.4; }
+  .tab .tab-label { font-size:10px; color:var(--ink-dim); letter-spacing:.5px; }
+  .tab.on .tab-ico { opacity:1; }
+  .tab.on .tab-label { color:var(--rose-deep); font-weight:600; }
+
+  /* 屏 3 进行中 */
+  .active-close {
+    position:relative; z-index:12;
+    margin:4px 0 0 22px; align-self:flex-start;
+    font-size:13px; color:var(--ink-soft); letter-spacing:1px;
+    cursor:pointer; padding:6px 4px;
+  }
+  .last-word {
+    text-align:center; height:34px; position:relative; z-index:8;
+  }
+  .last-word .lw {
+    font-size:23px; font-weight:300; color:var(--rose-deep);
+    letter-spacing:4px; opacity:0; transition:opacity .4s;
+  }
+  .last-word .lw.show { opacity:1; }
+  /* 滚动刻度盘 */
+  .dial-wrap {
+    flex-shrink:0; position:relative; z-index:10;
+    display:flex; flex-direction:column; align-items:center;
+    padding:6px 20px 40px;
+  }
+  .dial-svg { display:block; cursor:grab; }
+  .dial-svg:active { cursor:grabbing; }
+  /* 整个刻度盘转动时的过渡 */
+  #dialWheel { transition:transform .4s cubic-bezier(.34,1.05,.64,1); }
+  .dial-tick-line {
+    stroke:#E0CACB; stroke-width:2; stroke-linecap:round;
+  }
+  .dial-tick-line.gear {
+    stroke:#DBA897; stroke-width:3.5;
+  }
+  .dial-glabel {
+    font-size:12px; fill:var(--ink-mute); font-weight:500;
+    letter-spacing:1px; font-family:inherit;
+    transition:fill .3s;
+  }
+  .dial-glabel.on {
+    fill:var(--rose-deep); font-size:15px; font-weight:600;
+  }
+  /* 读取标记 — 顶部正中,固定 */
+  .dial-marker {
+    fill:var(--rose-deep);
+  }
+  .dial-center-name {
+    font-size:24px; fill:var(--rose-deep); font-weight:300;
+    letter-spacing:3px; font-family:inherit;
+  }
+  .dial-hint {
+    font-size:11px; color:var(--ink-dim); letter-spacing:1px;
+    margin-top:6px;
+  }
+
+  /* 屏 5 设置 */
+  #screenSettings .content {
+    flex:1; padding:0 24px; position:relative; z-index:5;
+    overflow-y:auto;
+  }
+  #screenSettings .content::-webkit-scrollbar { width:0; }
+  #screenSettings .settings-hero { padding:30px 8px 22px; }
+  #screenSettings .settings-hero .eyebrow { margin-bottom:10px; }
+  .set-group { margin-bottom:22px; }
+  .set-group-label {
+    font-size:11px; color:var(--ink-dim); letter-spacing:1.5px;
+    text-transform:uppercase; font-weight:600;
+    margin:0 8px 10px;
+  }
+  .set-list {
+    background:var(--bg-card); border:1px solid var(--line);
+    border-radius:18px; overflow:hidden;
+  }
+  .set-item {
+    padding:15px 18px; display:flex; align-items:center;
+    justify-content:space-between; cursor:pointer;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .set-item:last-child { border-bottom:none; }
+  .set-item:active { background:var(--bg-soft); }
+  .set-item .si-left { display:flex; align-items:center; gap:12px; }
+  .set-item .si-ico { font-size:16px; width:22px; text-align:center; }
+  .set-item .si-text { font-size:14px; color:var(--ink); font-weight:500; }
+  .set-item .si-sub { font-size:11px; color:var(--ink-dim); margin-top:2px; }
+  .set-item .si-right { font-size:13px; color:var(--ink-dim); }
+  .toggle {
+    width:44px; height:26px; border-radius:13px; background:var(--line);
+    position:relative; transition:background .25s; flex-shrink:0;
+  }
+  .toggle.on { background:var(--rose); }
+  .toggle::after {
+    content:''; position:absolute; top:3px; left:3px;
+    width:20px; height:20px; border-radius:50%; background:#FFFCFB;
+    transition:transform .25s; box-shadow:0 1px 4px rgba(0,0,0,.2);
+  }
+  .toggle.on::after { transform:translateX(18px); }
+  .dev-entry {
+    text-align:center; padding:18px 0 30px;
+    font-size:11px; color:var(--ink-mute); letter-spacing:1px;
+  }
+  .topnav {
+    flex-shrink:0; display:flex; align-items:center;
+    padding:6px 22px 0; position:relative; z-index:10;
+  }
+  .back-btn {
+    font-size:14px; color:var(--ink-soft); cursor:pointer;
+    display:flex; align-items:center; gap:5px; padding:6px 0;
+  }
+  .caption-label {
+    width:390px; margin-top:8px; text-align:center;
+    color:#8A8174; font-size:12px; font-weight:600;
+  }
+  .note {
+    max-width:380px; color:#8A8174; font-size:12px; line-height:1.8;
+  }
+  .note b { color:#5E564C; }
+  .note .hd {
+    color:var(--rose-deep); font-weight:700; font-size:11px;
+    letter-spacing:1px; text-transform:uppercase;
+    display:block; margin-bottom:8px;
+  }
+  .screens-row { display:flex; gap:24px; flex-wrap:wrap; justify-content:center; }
+</style>
+</head>
+<body>
+
+<div class="screens-row">
+
+<!-- ════ 屏 1 · 欢迎 / 连接 ════ -->
+<div>
+<div class="phone">
+  <div class="notch"></div>
+  <div class="bg-layer"></div>
+  <div class="screen" id="screenSplash" onclick="goScreen('screenConnect')">
+    <div class="statusbar"><span>9:41</span><span>●●● ◰ ▮</span></div>
+    <div class="splash-center">
+      <div class="splash-headline">你值得<b>被回应</b></div>
+      <div class="splash-brand">通感实验室</div>
+    </div>
+    <div class="splash-hint">轻触继续</div>
+  </div>
+</div>
+<div class="caption-label">屏 1 · 开屏(Slogan)</div>
+</div>
+
+<!-- ════ 屏 2A · 连接前 ════ -->
+<div>
+<div class="phone">
+  <div class="notch"></div>
+  <div class="bg-layer"></div>
+  <div class="screen" id="screenConnect">
+    <div class="statusbar"><span>9:41</span><span>●●● ◰ ▮</span></div>
+    <div class="content">
+      <div class="connect-hero">
+        <div class="eyebrow">通感实验室</div>
+        <div class="connect-title">连接你的设备</div>
+        <div class="connect-sub">让我们,先在一起。</div>
+      </div>
+
+      <div class="dev-list">
+        <!-- 设备列表标签:连接前后文字变化 -->
+        <div class="dev-list-label" id="devLabel">
+          <span class="scan-dot" id="scanDot"></span><span id="devLabelText">正在寻找你的设备</span>
+        </div>
+        <!-- 设备行:连接前后状态变化 -->
+        <div class="dev-row" id="devRow" onclick="doConnect()">
+          <div>
+            <div class="dev-name">你的设备</div>
+            <div class="dev-sub" id="devRowSub">就在附近 · 信号良好</div>
+          </div>
+          <div class="dev-go" id="devRowGo">连接 →</div>
+        </div>
+      </div>
+
+      <!-- 连接后才出现的"轻触开始" -->
+      <div class="ready-zone" id="readyZone" style="display:none">
+        <button class="btn-primary" onclick="goScreen('screenActive')">轻 触 开 始</button>
+        <div class="settings-link" onclick="goScreen('screenSettings')">设置与隐私</div>
+      </div>
+
+      <div style="flex:1"></div>
+      <div class="privacy-note">
+        连接是私密的。你的声音只在这台手机上处理,<br>不会上传,不会离开你。
+      </div>
+    </div>
+    <div style="height:24px"></div>
+  </div>
+</div>
+<div class="caption-label">屏 2A · 连接前(找设备)</div>
+</div>
+
+<!-- ════ 屏 2B · 连接后(静态展示,2A 原地变化) ════ -->
+<div>
+<div class="phone">
+  <div class="notch"></div>
+  <div class="bg-layer"></div>
+  <div class="screen" id="screenConnectedDemo">
+    <div class="statusbar"><span>9:41</span><span>●●● ◰ ▮</span></div>
+    <div class="content">
+      <div class="connect-hero">
+        <div class="eyebrow">通感实验室</div>
+        <div class="connect-title">连接你的设备</div>
+        <div class="connect-sub">让我们,先在一起。</div>
+      </div>
+
+      <div class="dev-list">
+        <div class="dev-list-label">
+          <span class="scan-dot still"></span><span>已连接</span>
+        </div>
+        <div class="dev-row connected">
+          <div>
+            <div class="dev-name">你的设备</div>
+            <div class="dev-sub">一切准备好了</div>
+          </div>
+          <div class="dev-go connected">✓ 已连接</div>
+        </div>
+      </div>
+
+      <div class="ready-zone" style="display:block">
+        <button class="btn-primary" onclick="goScreen('screenActive')">轻 触 开 始</button>
+        <div class="settings-link" onclick="goScreen('screenSettings')">设置与隐私</div>
+      </div>
+
+      <div style="flex:1"></div>
+      <div class="privacy-note">
+        连接是私密的。你的声音只在这台手机上处理,<br>不会上传,不会离开你。
+      </div>
+    </div>
+    <div style="height:24px"></div>
+  </div>
+</div>
+<div class="caption-label">屏 2B · 连接后(设备行变化 + 出现“轻触开始”)</div>
+</div>
+
+<!-- ════ 屏 3 · 进行中 ════ -->
+<div>
+<div class="phone">
+  <div class="notch"></div>
+  <div class="bg-layer"></div>
+  <div class="screen" id="screenActive">
+    <div class="statusbar"><span>9:41</span><span>●●● ◰ ▮</span></div>
+    <div class="active-close" onclick="goHome()">✕ 结束</div>
+    <div class="wave-wrap">
+      <canvas class="wave" id="waveActive" width="372" height="220"></canvas>
+    </div>
+    <div class="last-word"><span class="lw" id="lwText"></span></div>
+    <div class="dial-wrap">
+      <svg class="dial-svg" id="dialSvg" width="300" height="200" viewBox="0 0 300 200">
+        <defs>
+          <!-- 只显示上半圆区域,下半圈刻度裁掉 -->
+          <clipPath id="dialClip">
+            <rect x="0" y="0" width="300" height="150"/>
+          </clipPath>
+        </defs>
+        <!-- 可旋转的整个刻度盘(铺满整圈),裁到上半圆可见 -->
+        <g clip-path="url(#dialClip)">
+          <g id="dialWheel"></g>
+        </g>
+        <!-- 固定的读取标记 — 顶部正中,小三角指下来 -->
+        <path class="dial-marker" d="M 150 14 L 144 4 L 156 4 Z"/>
+      </svg>
+      <div class="dial-hint">拨动刻度盘 · 调整氛围</div>
+    </div>
+  </div>
+</div>
+<div class="caption-label">屏 3 · 进行中(波形 + 滚动刻度盘)</div>
+</div>
+
+<!-- ════ 屏 5 · 设置 ════ -->
+<div>
+<div class="phone">
+  <div class="notch"></div>
+  <div class="bg-layer"></div>
+  <div class="screen" id="screenSettings">
+    <div class="statusbar"><span>9:41</span><span>●●● ◰ ▮</span></div>
+    <div class="content">
+      <div class="settings-hero">
+        <div class="eyebrow">我的</div>
+      </div>
+      <div class="set-group">
+        <div class="set-group-label">设备</div>
+        <div class="set-list">
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">◍</span>
+              <div><div class="si-text">你的设备</div>
+                <div class="si-sub">已连接 · 电量 80%</div></div>
+            </div>
+            <span class="si-right">›</span>
+          </div>
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">⊙</span>
+              <div class="si-text">震动强度上限</div></div>
+            <span class="si-right">中等 ›</span>
+          </div>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-group-label">隐私与安全</div>
+        <div class="set-list">
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">⊘</span>
+              <div><div class="si-text">声音只在本地处理</div>
+                <div class="si-sub">永不上传,永不离开手机</div></div>
+            </div>
+            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">🔒</span>
+              <div><div class="si-text">打开 App 需要验证</div>
+                <div class="si-sub">用 Face ID 保护你的私密空间</div></div>
+            </div>
+            <div class="toggle" onclick="this.classList.toggle('on')"></div>
+          </div>
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">⊗</span>
+              <div class="si-text">清除所有数据</div></div>
+            <span class="si-right">›</span>
+          </div>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-group-label">关于</div>
+        <div class="set-list">
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">❀</span>
+              <div class="si-text">了解你的身体</div></div>
+            <span class="si-right">›</span>
+          </div>
+          <div class="set-item">
+            <div class="si-left"><span class="si-ico">♡</span>
+              <div class="si-text">联系我们</div></div>
+            <span class="si-right">›</span>
+          </div>
+        </div>
+      </div>
+      <div class="dev-entry" id="devEntry" onclick="devTap()">通感实验室 · v1.0</div>
+    </div>
+    <div class="tabbar">
+      <div class="tab" onclick="goHome()"><div class="tab-ico">◍</div><div class="tab-label">此刻</div></div>
+      <div class="tab on"><div class="tab-ico">⚐</div><div class="tab-label">我的</div></div>
+    </div>
+  </div>
+</div>
+<div class="caption-label">屏 5 · 设置(含开发者模式入口)</div>
+</div>
+
+</div>
+
+<div class="note">
+  <span class="hd">会回应你 · Consumer App · 4 屏</span>
+  樱与奶色系 — 奶油白底 + 柔樱花粉 + 豆沙红。视觉主体是<b>横向声波</b> — 上下对称,带柔和填充。<br><br>
+  <b>波形 = 回应强度</b>。氛围档位(轻柔/流动/深沉)= 不同的马达强度,你说话时再叠加涌动。<br>
+  · <b>屏 1 开屏</b> → slogan “你值得被回应” → 轻触进入连接<br>
+  · <b>屏 2 连接</b> → 点设备 → 连接成功后,同屏出现 “轻触开始”<br>
+  · <b>屏 3 进行中</b> → 波形 + <b>刻度轮盘调氛围</b>(左上角“✕ 结束”) + 浮现回应的词<br>
+  · <b>屏 4 设置</b> → 隐私优先 + 开发者模式入口(点底部 “通感实验室 · v1.0” 5 下)<br><br>
+  流程:开屏 slogan → 连接设备(连上即出现 “轻触开始”)→ 进行中。波形只在进行中出现。
+</div>
+
+<script>
+  // ════════ 横向波形引擎 ════════
+  // 视觉风格固定:密度 0.60 / 填充 0.70(调试页定的值)
+  // 数据驱动:amplitude = 设备对你的「回应强度」(底层是马达强度,
+  //   但对用户不暴露"马达"字样,它就是一道会回应你的波)
+  // flowSpeed = 节奏(由氛围决定)
+  const STYLE = { density:0.60, fill:0.70 };
+
+  function createWave(canvasId, w, h, getState) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 2;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    const midY = h/2;
+    let t = Math.random()*10;
+
+    function waveOffset(x, level) {
+      const freq = 2 + STYLE.density * 7;
+      const w1 = Math.sin(x*Math.PI*2*freq      + t*1.0);
+      const w2 = Math.sin(x*Math.PI*2*freq*0.5  - t*0.7) * 0.6;
+      const w3 = Math.sin(x*Math.PI*2*freq*1.7  + t*1.4) * 0.35;
+      let combined = (w1 + w2 + w3) / 1.95;
+      const taper = Math.sin(x * Math.PI);
+      return combined * taper * level;
+    }
+
+    function frame() {
+      const st = getState();   // { amplitude:0~1, flowSpeed:0~1, energy:0~1 }
+      t += 0.016 * (0.4 + st.flowSpeed*2.2);
+      ctx.clearRect(0, 0, w, h);
+
+      const level = st.amplitude * h * 0.42;
+      const steps = 90;
+
+      // 柔和填充
+      if (STYLE.fill > 0.02) {
+        ctx.beginPath();
+        ctx.moveTo(0, midY);
+        for (let i = 0; i <= steps; i++) {
+          const x = i/steps;
+          ctx.lineTo(x*w, midY - waveOffset(x, level));
+        }
+        for (let i = steps; i >= 0; i--) {
+          const x = i/steps;
+          ctx.lineTo(x*w, midY + waveOffset(x, level));
+        }
+        ctx.closePath();
+        const fillG = ctx.createLinearGradient(0, midY-level, 0, midY+level);
+        const fa = STYLE.fill * (0.22 + st.energy*0.18);
+        fillG.addColorStop(0,   'rgba(227,164,174,0)');
+        fillG.addColorStop(0.5, `rgba(227,164,174,${fa})`);
+        fillG.addColorStop(1,   'rgba(227,164,174,0)');
+        ctx.fillStyle = fillG;
+        ctx.fill();
+      }
+
+      // 波形线(上 + 下镜像)
+      function strokeWave(mirror) {
+        ctx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+          const x = i/steps;
+          const off = waveOffset(x, level);
+          const py = mirror ? midY + off : midY - off;
+          i === 0 ? ctx.moveTo(x*w, py) : ctx.lineTo(x*w, py);
+        }
+        ctx.strokeStyle = 'rgba(181,112,124,.85)';
+        ctx.lineWidth = 2.4;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(227,164,174,.4)';
+        ctx.lineWidth = 6;
+        ctx.stroke();
+      }
+      strokeWave(false);
+      strokeWave(true);
+
+      // 两端端点光
+      [0, w].forEach(ex => {
+        const g = ctx.createRadialGradient(ex, midY, 0, ex, midY, 14);
+        g.addColorStop(0, 'rgba(255,237,239,.7)');
+        g.addColorStop(1, 'rgba(255,237,239,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(ex, midY, 14, 0, Math.PI*2);
+        ctx.fill();
+      });
+
+      requestAnimationFrame(frame);
+    }
+    frame();
+  }
+
+  // ════════ 状态 ════════
+  const app = {
+    screen:'screenSplash',
+    energy:0, targetEnergy:0,   // 说话带来的强度涌动
+    mood:'gentle',              // 氛围档位 = 马达强度档
+  };
+  // 氛围 = 马达强度档位:决定基础强度区间 + 节奏
+  // gentle 轻柔(弱) / flow 流动(中) / deep 深沉(强)
+  const moodConfig = {
+    gentle: { base:0.30, flow:0.5, name:'轻柔' },
+    flow:   { base:0.55, flow:0.85, name:'流动' },
+    deep:   { base:0.80, flow:0.65, name:'深沉' },
+  };
+
+  // 屏 3 进行中 — 波形高度 = 氛围档位(马达强度) + 说话涌动
+  createWave('waveActive', 372, 240, () => {
+    app.energy += (app.targetEnergy - app.energy) * 0.06;
+    if (app.targetEnergy > 0) app.targetEnergy -= 0.004;
+    if (app.targetEnergy < 0) app.targetEnergy = 0;
+    const cfg = moodConfig[app.mood];
+    // 振幅 = 氛围档位的基础强度 + 说话涌动
+    const amplitude = cfg.base * 0.7 + app.energy * 0.35;
+    return {
+      amplitude,
+      flowSpeed: cfg.flow,
+      energy: app.energy,
+    };
+  });
+
+  // ════════ 屏切换 ════════
+  function goScreen(id) {
+    document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));
+    document.querySelectorAll('#'+id).forEach(s=>s.classList.remove('hidden'));
+    app.screen = id;
+    if (id==='screenActive') { app.energy=0; app.targetEnergy=0; }
+  }
+
+  // ════════ 连接 — 连上后,设备行原地变化 + "轻触开始"出现 ════════
+  function doConnect() {
+    // 标签:正在寻找 → 已连接
+    document.getElementById('devLabelText').textContent = '已连接';
+    document.getElementById('scanDot').classList.add('still');
+    // 设备行:变成已连接状态
+    const row = document.getElementById('devRow');
+    row.classList.add('connected');
+    row.onclick = null;
+    document.getElementById('devRowSub').textContent = '一切准备好了';
+    document.getElementById('devRowGo').textContent = '✓ 已连接';
+    document.getElementById('devRowGo').classList.add('connected');
+    // "轻触开始"出现
+    document.getElementById('readyZone').style.display = 'block';
+  }
+  // 回到"家" — 连接屏的已连接状态(此刻 tab / 结束 都走这里)
+  function goHome() {
+    doConnect();   // 确保连接屏处于已连接状态
+    goScreen('screenConnect');
+  }
+
+  // ════════ 滚动刻度盘 — 调氛围(= 马达强度档位) ════════
+  const DIAL = { cx:150, cy:150, rOuter:118, rInner:100 };
+  // 三档在「盘上」的本位角度(盘不转时各档所在角度)
+  // SVG 角度:90°=顶部读取点。三档间隔 60°
+  // gentle 在 150°, flow 在 90°, deep 在 30°
+  const moodHome = { gentle:150, flow:90, deep:30 };
+  // 选某档时,需要把盘转动的角度 = 让该档对齐到顶部 90°
+  // 旋转量(SVG rotate,顺时针为正) = moodHome - 90
+  const moodRotate = { gentle:60, flow:0, deep:-60 };
+
+  // 角度 → 坐标(SVG y 向下,所以用 -sin)
+  function polar(angleDeg, radius) {
+    const a = angleDeg * Math.PI / 180;
+    return {
+      x: DIAL.cx + Math.cos(a) * radius,
+      y: DIAL.cy - Math.sin(a) * radius,
+    };
+  }
+
+  // 生成整个刻度盘:刻度线铺满 -90°~270°(绕一整圈),每 5° 一根
+  // 铺满整圈 → 盘转动时可见的半圆永远有刻度,不会空缺
+  function buildWheel() {
+    const g = document.getElementById('dialWheel');
+    let html = '';
+    // 刻度线 — 铺满整圈
+    for (let deg = -90; deg <= 270; deg += 5) {
+      // 离任一档本位 < 3° 的算档位刻度(加粗)
+      const isGear = [30,90,150].some(h => Math.abs(deg-h) < 3);
+      const p1 = polar(deg, DIAL.rOuter);
+      const p2 = polar(deg, isGear ? DIAL.rInner-7 : DIAL.rInner);
+      const cls = isGear ? 'dial-tick-line gear' : 'dial-tick-line';
+      html += `<line class="${cls}" x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}"/>`;
+    }
+    // 三档标签 — 放在各自本位、刻度内侧
+    const labels = [
+      { m:'gentle', txt:'轻柔' },
+      { m:'flow',   txt:'流动' },
+      { m:'deep',   txt:'深沉' },
+    ];
+    labels.forEach(l => {
+      const p = polar(moodHome[l.m], DIAL.rInner - 22);
+      html += `<text id="glabel-${l.m}" class="dial-glabel" x="${p.x.toFixed(1)}" y="${(p.y+4).toFixed(1)}" text-anchor="middle">${l.txt}</text>`;
+    });
+    g.innerHTML = html;
+  }
+  buildWheel();
+
+  // 刻度盘当前实际旋转角度(连续值)
+  let dialAngle = moodRotate.gentle;   // 初始 = 轻柔
+
+  // 应用旋转角到刻度盘
+  function applyDialRotation(angle, withTransition) {
+    const wheel = document.getElementById('dialWheel');
+    wheel.style.transition = withTransition
+      ? 'transform .4s cubic-bezier(.34,1.05,.64,1)'
+      : 'none';
+    wheel.setAttribute('transform',
+      `rotate(${angle} ${DIAL.cx} ${DIAL.cy})`);
+  }
+
+  // 根据当前旋转角,找最近的档位
+  function nearestMood(angle) {
+    let best = 'flow', bestDiff = Infinity;
+    for (const m in moodRotate) {
+      const d = Math.abs(angle - moodRotate[m]);
+      if (d < bestDiff) { bestDiff = d; best = m; }
+    }
+    return best;
+  }
+
+  // 高亮当前档标签
+  function highlightLabel(mood) {
+    ['gentle','flow','deep'].forEach(m=>{
+      const el = document.getElementById('glabel-'+m);
+      if (el) el.classList.toggle('on', m===mood);
+    });
+  }
+
+  // setDial — 吸附到某档(带回弹动画)
+  function setDial(mood) {
+    app.mood = mood;
+    dialAngle = moodRotate[mood];
+    applyDialRotation(dialAngle, true);
+    highlightLabel(mood);
+  }
+
+  // ─── 真正的拖动:按住绕圆心转 ───
+  const dialSvg = document.getElementById('dialSvg');
+  let dialDragging = false;
+  let dragStartPointerAngle = 0;   // 按下时鼠标相对圆心的角度
+  let dragStartDialAngle = 0;      // 按下时盘的旋转角
+
+  // 鼠标在 SVG 里相对圆心的角度
+  function pointerAngle(evt) {
+    const rect = dialSvg.getBoundingClientRect();
+    const vx = (evt.clientX - rect.left) / rect.width * 300;
+    const vy = (evt.clientY - rect.top) / rect.height * 200;
+    // atan2 返回标准数学角度,转成"顺时针为正"以匹配 SVG rotate
+    return Math.atan2(vy - DIAL.cy, vx - DIAL.cx) * 180 / Math.PI;
+  }
+
+  dialSvg.addEventListener('pointerdown', e=>{
+    dialDragging = true;
+    dragStartPointerAngle = pointerAngle(e);
+    dragStartDialAngle = dialAngle;
+    dialSvg.setPointerCapture(e.pointerId);
+  });
+  dialSvg.addEventListener('pointermove', e=>{
+    if (!dialDragging) return;
+    // 鼠标转过的角度差
+    const delta = pointerAngle(e) - dragStartPointerAngle;
+    // 盘实时跟手转动(不加过渡,跟手)
+    let ang = dragStartDialAngle + delta;
+    // 限制在档位范围内(留一点余量,手感更自然)
+    ang = Math.max(moodRotate.deep - 25, Math.min(moodRotate.gentle + 25, ang));
+    dialAngle = ang;
+    applyDialRotation(ang, false);
+    // 拖动中实时高亮最近档
+    highlightLabel(nearestMood(ang));
+  });
+  function endDrag() {
+    if (!dialDragging) return;
+    dialDragging = false;
+    // 松手 → 吸附到最近档位(带回弹)
+    setDial(nearestMood(dialAngle));
+  }
+  dialSvg.addEventListener('pointerup', endDrag);
+  dialSvg.addEventListener('pointercancel', endDrag);
+
+  // 初始化到轻柔
+  setDial('gentle');
+
+  // ════════ 模拟语音 — 你说话 → 它回应,波形随回应强度涌起 ════════
+  const words = ['轻一点','再来','慢一点','用力','停','好舒服'];
+  setInterval(()=>{
+    if (app.screen!=='screenActive') return;
+    const w = words[Math.floor(Math.random()*words.length)];
+    // 你说一句话 → 它回应你 → 回应强度变化
+    if (w==='停') app.targetEnergy = 0.15;
+    else if (w==='用力') app.targetEnergy = 1.0;
+    else if (w==='轻一点'||w==='慢一点') app.targetEnergy = 0.45;
+    else app.targetEnergy = 0.75;
+    const lw = document.getElementById('lwText');
+    lw.textContent = w;
+    lw.classList.add('show');
+    setTimeout(()=>lw.classList.remove('show'),2000);
+  }, 3200);
+  // 进行中待机时偶尔轻轻起伏(听到呼吸)
+  setInterval(()=>{
+    if (app.screen==='screenActive' && Math.random()<0.35) {
+      app.targetEnergy = Math.max(app.targetEnergy, 0.4);
+    }
+  }, 2800);
+
+  // ════════ 开发者模式 ════════
+  let devTaps=0, devTimer;
+  function devTap() {
+    devTaps++;
+    clearTimeout(devTimer);
+    devTimer = setTimeout(()=>devTaps=0,1500);
+    if (devTaps>=5) {
+      devTaps=0;
+      alert('开发者模式\n\n(此处进入 Debug 界面:实时波形 / FSR 数值 / BLE 延迟 / 模式切换 / 急停)\n\n真实用户不会触发到这里。');
+    }
+  }
+
+  window.addEventListener('load',()=>{
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('hidden'));
+  });
+</script>
+</body>
+</html>
