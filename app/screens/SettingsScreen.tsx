@@ -7,16 +7,6 @@ import {
   disconnect,
   writeLevel,
 } from '../services/ble';
-import {
-  getStrengthCap,
-  setStrengthCap,
-  subscribeStrengthCap,
-  resetAllPrefs,
-  CAP_LABELS,
-  StrengthCap,
-} from '../services/prefs';
-
-const CAP_ORDER: StrengthCap[] = ['high', 'med', 'low'];
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -32,19 +22,7 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 
 export default function SettingsScreen({ navigation }: any) {
   const [localOnly, setLocalOnly] = useState(true);
-  const [cap, setCap] = useState<StrengthCap>(getStrengthCap());
   const [device, setDevice] = useState(getActiveDevice());
-
-  useEffect(() => {
-    const unsub = subscribeStrengthCap(setCap);
-    return unsub;
-  }, []);
-
-  const cycleCap = () => {
-    const idx = CAP_ORDER.indexOf(cap);
-    const next = CAP_ORDER[(idx + 1) % CAP_ORDER.length];
-    setStrengthCap(next);
-  };
 
   const handleDevicePress = () => {
     if (!device) {
@@ -83,7 +61,6 @@ export default function SettingsScreen({ navigation }: any) {
               await disconnect(d);
               setActiveDevice(null);
             }
-            resetAllPrefs();
             setLocalOnly(true);
             navigation.replace('Connect');
           },
@@ -113,13 +90,6 @@ export default function SettingsScreen({ navigation }: any) {
               sub={device ? `已连接 · ${device.name ?? 'Vibration_Egg3'}` : '未连接'}
               right={device ? '断开 ›' : '去连接 ›'}
               onPress={handleDevicePress}
-            />
-            <Row
-              icon="⊙"
-              title="震动强度上限"
-              sub="拖动刻度盘和语音都会被限制在这个上限内"
-              right={`${CAP_LABELS[cap]} ›`}
-              onPress={cycleCap}
               last
             />
           </View>

@@ -11,11 +11,21 @@ import {
 } from '../services/ble';
 import Wave from '../components/Wave';
 import Dial, { Mood } from '../components/Dial';
+import StageDots from '../components/StageDots';
+import PerceptionLine from '../components/PerceptionLine';
 import {
   startVoiceSession,
   stopVoiceSession,
   VoiceIntent,
 } from '../services/voice';
+import {
+  AIFrame,
+  AIStage,
+  AIInput,
+  callGrok,
+  mockNextFrame,
+  MOCK_LEN,
+} from '../services/ai';
 
 // Firmware uses inverted levels: 0=HIGH(strongest), 1=MED, 2=LOW, 3=OFF.
 const MOOD_TO_LEVEL: Record<Mood, 0 | 1 | 2 | 3> = {
@@ -37,6 +47,10 @@ export default function ActiveScreen({ navigation }: any) {
   const [paused, setPaused] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceText, setVoiceText] = useState<string>('');
+  const [aiOn, setAiOn] = useState(false);
+  const [aiFrame, setAiFrame] = useState<AIFrame | null>(null);
+  const aiTickRef = useRef(0);
+  const aiTimerRef = useRef<NodeJS.Timeout | null>(null);
   const voiceTextTimer = useRef<NodeJS.Timeout | null>(null);
   // Keep latest mood/paused accessible inside voice handler without recreating it.
   const moodRef = useRef<Mood>('gentle');
@@ -50,6 +64,12 @@ export default function ActiveScreen({ navigation }: any) {
 
   const strengthRef = useRef(levelToStrength(MOOD_TO_LEVEL.gentle));
   const fsrRef = useRef(0);
+  // Rolling FSR history (raw 0..4095 values w/ timestamps) for AI aggregation.
+  const fsrHistoryRef = useRef<{ t: number; v: number }[]>([]);
+  // Contact-start timestamp (ms) — null when not in contact.
+  const contactStartRef = useRef<number | null>(null);
+  // Recent voice transcript (final) + timestamp, fed into AI input.
+  const recentSpeechRef = useRef<{ text: string; t: number } | null>(null);
 
   const getWaveState = useCallback(() => {
     const amp = strengthRef.current;
@@ -81,6 +101,27 @@ export default function ActiveScreen({ navigation }: any) {
       if (typeof t.fsr === 'number') {
         const target = Math.min(t.fsr, MAX_FSR) / MAX_FSR;
         fsrRef.current = fsrRef.current + (target - fsrRef.current) * 0.35;
+        // Append to rolling history; trim entries older than 12s.
+        const now = Date.now();
+        fsrHistoryRef.current.push({ t: now, v: t.fsr });
+        const cutoff = now - 12000;
+        while (
+          fsrHistoryRef.current.length > 0 &&
+          fsrHistoryRef.current[0].t < cutoff
+        ) {
+          fsrHistoryRef.current.shift();
+        }
+        // Track contact-start: threshold ~10% of max.
+        const inContact = t.fsr > 400;
+        if (inContact && contactStartRef.current == null) {
+          contactStartRef.current = now;
+        } else if (!inContact && contactStartRef.current != null) {
+          // Only reset if released for ≥ 1s, to ignore micro-gaps.
+          const recentlyContacted = fsrHistoryRef.current.some(
+            (s) => s.t > now - 1000 && s.v > 400,
+          );
+          if (!recentlyContacted) contactStartRef.current = null;
+        }
       }
       // Log every 5th packet so we don't drown the console.
       if (++logCnt % 5 === 0) {
@@ -159,6 +200,7 @@ export default function ActiveScreen({ navigation }: any) {
         onPartial: (t) => flashVoiceText(t, 4000),
         onFinal: (t, intent) => {
           flashVoiceText(t, 2200);
+          recentSpeechRef.current = { text: t, t: Date.now() };
           if (intent) applyIntent(intent);
         },
         onError: (msg) => {
@@ -175,8 +217,114 @@ export default function ActiveScreen({ navigation }: any) {
     return () => {
       stopVoiceSession();
       if (voiceTextTimer.current) clearTimeout(voiceTextTimer.current);
+      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
     };
   }, []);
+
+  // AI mode: every ~2.5s we synthesize an AIInput describing the last window,
+  // call Grok, render the returned frame, and push the level into writeLevel
+  // (which still respects the cap). If Grok fails or times out, we fall back
+  // to the scripted mock for that tick so the demo never goes blank.
+  const aiStartedAtRef = useRef(0);
+  const aiInFlightRef = useRef(false);
+  const lastFrameRef = useRef<AIFrame | null>(null);
+
+  // Build the real input fed to Grok from FSR history + last voice transcript.
+  // Audio (moan/breath) is not wired yet — kept as a fixed neutral string
+  // until step 3b adds mic envelope analysis.
+  const buildInput = useCallback((): AIInput => {
+    const now = Date.now();
+    const elapsed = Math.floor((now - aiStartedAtRef.current) / 1000);
+    const hist = fsrHistoryRef.current;
+
+    // FSR summary
+    let fsrSummary = '无接触';
+    if (hist.length > 0) {
+      const recent = hist.filter((s) => s.t > now - 5000);
+      if (recent.length > 0) {
+        const peak = Math.max(...recent.map((s) => s.v));
+        const avg = recent.reduce((a, s) => a + s.v, 0) / recent.length;
+        const peakPct = Math.round((peak / MAX_FSR) * 100);
+        const avgPct = Math.round((avg / MAX_FSR) * 100);
+        if (peak < 400) {
+          fsrSummary = '几乎无压力';
+        } else {
+          const contactSec = contactStartRef.current
+            ? Math.round((now - contactStartRef.current) / 1000)
+            : 0;
+          // Detect rhythm: count zero-crossings around mid level in last 5s.
+          const mid = avg;
+          let crosses = 0;
+          for (let i = 1; i < recent.length; i++) {
+            if (
+              (recent[i - 1].v < mid && recent[i].v >= mid) ||
+              (recent[i - 1].v >= mid && recent[i].v < mid)
+            ) {
+              crosses++;
+            }
+          }
+          const rhythm = crosses > 6 ? ',有明显节律' : crosses > 2 ? ',轻微起伏' : ',平稳';
+          fsrSummary = `接触 ${contactSec} 秒,平均 ${avgPct}%,峰值 ${peakPct}%${rhythm}`;
+        }
+      }
+    }
+
+    // Voice: include if heard within last 8s
+    let speech = '';
+    const sp = recentSpeechRef.current;
+    if (sp && now - sp.t < 8000) {
+      speech = sp.text;
+    }
+
+    return {
+      fsrSummary,
+      audioSummary: '未启用',
+      recentSpeech: speech,
+      lastStage: lastFrameRef.current?.stage,
+      lastLevel: lastFrameRef.current?.level,
+      secondsSinceStart: elapsed,
+    };
+  }, []);
+
+  const handleToggleAi = useCallback(() => {
+    if (aiOn) {
+      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+      aiTimerRef.current = null;
+      aiInFlightRef.current = false;
+      lastFrameRef.current = null;
+      setAiOn(false);
+      setAiFrame(null);
+      return;
+    }
+    setAiOn(true);
+    aiTickRef.current = 0;
+    aiStartedAtRef.current = Date.now();
+    lastFrameRef.current = null;
+
+    const tick = async () => {
+      if (aiInFlightRef.current) return; // skip if previous still running
+      aiInFlightRef.current = true;
+      const input = buildInput();
+      console.log('[AI] input:', JSON.stringify(input));
+      let frame: AIFrame;
+      try {
+        frame = await callGrok(input);
+        console.log('[AI] grok →', frame.stage, frame.level, frame.perception);
+      } catch (e: any) {
+        console.warn('[AI] grok failed, falling back to mock:', e?.message ?? e);
+        frame = mockNextFrame(aiTickRef.current);
+      }
+      lastFrameRef.current = frame;
+      setAiFrame(frame);
+      if (device && Platform.OS !== 'web') {
+        writeLevel(device, frame.level);
+      }
+      aiTickRef.current = (aiTickRef.current + 1) % MOCK_LEN;
+      aiInFlightRef.current = false;
+    };
+    tick();
+    aiTimerRef.current = setInterval(tick, 2500);
+  }, [aiOn, device, buildInput]);
 
   const handleTogglePause = () => {
     if (!device || Platform.OS === 'web') return;
@@ -208,6 +356,12 @@ export default function ActiveScreen({ navigation }: any) {
           <Text style={styles.topBtnText}>⚐ 我的</Text>
         </Pressable>
         <View style={styles.topRight}>
+          <Pressable onPress={handleToggleAi} style={styles.topBtn}>
+            <Text
+              style={[styles.topBtnText, aiOn && styles.topBtnTextActive]}>
+              {aiOn ? '✦ AI 中' : '✧ AI'}
+            </Text>
+          </Pressable>
           <Pressable onPress={handleToggleListen} style={styles.topBtn}>
             <Text
               style={[styles.topBtnText, listening && styles.topBtnTextActive]}>
@@ -222,6 +376,12 @@ export default function ActiveScreen({ navigation }: any) {
           </Pressable>
         </View>
       </View>
+
+      <StageDots stage={aiOn ? (aiFrame?.stage ?? null) : null} />
+      <PerceptionLine
+        perception={aiOn ? (aiFrame?.perception ?? null) : null}
+        intention={aiOn ? (aiFrame?.intention ?? null) : null}
+      />
 
       {voiceText ? (
         <View style={styles.voiceOverlay} pointerEvents="none">

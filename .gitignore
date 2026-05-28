@@ -53,3 +53,6 @@ local.properties
 
 # Sensitive raw materials (large binaries from prototypes)
 原始资料/*.docx
+
+# API keys
+app/services/aiConfig.ts
