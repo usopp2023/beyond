@@ -14,45 +14,62 @@ type Props = {
   getState: () => WaveState;
 };
 
-const STYLE = { density: 0.6, fill: 0.7 };
-const STEPS = 90;
+const STYLE = { density: 0.48, fill: 0.7 };
+const STEPS = 120;
 
 function buildPaths(t: number, state: WaveState, w: number, h: number) {
   const midY = h / 2;
-  const freq = 2 + STYLE.density * 7;
-  const level = state.amplitude * h * 0.42;
+  const freq = 1.8 + STYLE.density * 5;
+  const level = state.amplitude * h * 0.4;
 
   const offsetAt = (xn: number) => {
     const w1 = Math.sin(xn * Math.PI * 2 * freq + t * 1.0);
-    const w2 = Math.sin(xn * Math.PI * 2 * freq * 0.5 - t * 0.7) * 0.6;
-    const w3 = Math.sin(xn * Math.PI * 2 * freq * 1.7 + t * 1.4) * 0.35;
-    const combined = (w1 + w2 + w3) / 1.95;
+    const w2 = Math.sin(xn * Math.PI * 2 * freq * 0.5 - t * 0.7) * 0.45;
+    const combined = (w1 + w2) / 1.45;
     const taper = Math.sin(xn * Math.PI);
     return combined * taper * level;
   };
 
-  let top = '';
-  let bottom = '';
+  // Smooth via Catmull-Rom-style midpoint quadratic Bezier: each segment
+  // ends at the midpoint between consecutive sample points, using the
+  // sample point itself as the control. This rounds off any sharpness left
+  // by the discrete sampling.
+  const pts: { x: number; up: number; dn: number }[] = [];
   for (let i = 0; i <= STEPS; i++) {
     const xn = i / STEPS;
     const x = xn * w;
     const off = offsetAt(xn);
-    const cmd = i === 0 ? 'M' : 'L';
-    top += `${cmd}${x.toFixed(1)},${(midY - off).toFixed(1)} `;
-    bottom += `${cmd}${x.toFixed(1)},${(midY + off).toFixed(1)} `;
+    pts.push({ x, up: midY - off, dn: midY + off });
   }
 
-  // Fill path: top then bottom reversed -> closed shape
-  let fill = '';
-  for (let i = 0; i <= STEPS; i++) {
-    const xn = i / STEPS;
-    const x = xn * w;
-    fill += `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${(midY - offsetAt(xn)).toFixed(1)} `;
-  }
-  for (let i = STEPS; i >= 0; i--) {
-    const xn = i / STEPS;
-    const x = xn * w;
-    fill += `L${x.toFixed(1)},${(midY + offsetAt(xn)).toFixed(1)} `;
+  const buildSmooth = (key: 'up' | 'dn') => {
+    let d = `M${pts[0].x.toFixed(1)},${pts[0][key].toFixed(1)} `;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const cx = pts[i].x;
+      const cy = pts[i][key];
+      const mx = (pts[i].x + pts[i + 1].x) / 2;
+      const my = (pts[i][key] + pts[i + 1][key]) / 2;
+      d += `Q${cx.toFixed(1)},${cy.toFixed(1)} ${mx.toFixed(1)},${my.toFixed(1)} `;
+    }
+    const last = pts[pts.length - 1];
+    d += `L${last.x.toFixed(1)},${last[key].toFixed(1)} `;
+    return d;
+  };
+
+  const top = buildSmooth('up');
+  const bottom = buildSmooth('dn');
+
+  // Fill: smoothed top forward + smoothed bottom reversed
+  let fill = top;
+  for (let i = pts.length - 1; i > 0; i--) {
+    const cx = pts[i].x;
+    const cy = pts[i].dn;
+    const mx = (pts[i].x + pts[i - 1].x) / 2;
+    const my = (pts[i].dn + pts[i - 1].dn) / 2;
+    if (i === pts.length - 1) {
+      fill += `L${cx.toFixed(1)},${cy.toFixed(1)} `;
+    }
+    fill += `Q${cx.toFixed(1)},${cy.toFixed(1)} ${mx.toFixed(1)},${my.toFixed(1)} `;
   }
   fill += 'Z';
 

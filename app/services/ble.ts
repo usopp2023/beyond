@@ -1,5 +1,6 @@
 import { Platform, PermissionsAndroid } from 'react-native';
 import { BleManager, Device, Subscription } from 'react-native-ble-plx';
+import { clampLevelByCap } from './prefs';
 
 export const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 export const WRITE_CHAR_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
@@ -132,15 +133,20 @@ export async function writeCommand(device: Device, command: string): Promise<voi
 const LEVEL_B64 = ['MA==', 'MQ==', 'Mg==', 'Mw=='] as const;
 
 export function writeLevel(device: Device, level: 0 | 1 | 2 | 3): void {
-  console.log(`[BLE-FAF] writeLevel ${level}`);
+  const capped = clampLevelByCap(level);
+  if (capped !== level) {
+    console.log(`[BLE-FAF] writeLevel ${level} → clamped to ${capped} by cap`);
+  } else {
+    console.log(`[BLE-FAF] writeLevel ${level}`);
+  }
   device
     .writeCharacteristicWithoutResponseForService(
       SERVICE_UUID,
       WRITE_CHAR_UUID,
-      LEVEL_B64[level],
+      LEVEL_B64[capped],
     )
-    .then(() => console.log(`[BLE-FAF] writeLevel ${level} OK`))
-    .catch((e: any) => console.warn(`[BLE-FAF] writeLevel ${level} ERR:`, e?.message ?? e));
+    .then(() => console.log(`[BLE-FAF] writeLevel ${capped} OK`))
+    .catch((e: any) => console.warn(`[BLE-FAF] writeLevel ${capped} ERR:`, e?.message ?? e));
 }
 
 export async function disconnect(device: Device): Promise<void> {

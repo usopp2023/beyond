@@ -11,6 +11,11 @@ import {
 } from '../services/ble';
 import Wave from '../components/Wave';
 import Dial, { Mood } from '../components/Dial';
+import {
+  startVoiceSession,
+  stopVoiceSession,
+  VoiceIntent,
+} from '../services/voice';
 
 // Firmware uses inverted levels: 0=HIGH(strongest), 1=MED, 2=LOW, 3=OFF.
 const MOOD_TO_LEVEL: Record<Mood, 0 | 1 | 2 | 3> = {
@@ -30,6 +35,18 @@ export default function ActiveScreen({ navigation }: any) {
   const [mood, setMood] = useState<Mood>('gentle');
   const [telemetry, setTelemetry] = useState<Telemetry>({});
   const [paused, setPaused] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceText, setVoiceText] = useState<string>('');
+  const voiceTextTimer = useRef<NodeJS.Timeout | null>(null);
+  // Keep latest mood/paused accessible inside voice handler without recreating it.
+  const moodRef = useRef<Mood>('gentle');
+  const pausedRef = useRef(false);
+  useEffect(() => {
+    moodRef.current = mood;
+  }, [mood]);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   const strengthRef = useRef(levelToStrength(MOOD_TO_LEVEL.gentle));
   const fsrRef = useRef(0);
@@ -94,6 +111,73 @@ export default function ActiveScreen({ navigation }: any) {
     [device],
   );
 
+  const flashVoiceText = (text: string, ms = 1800) => {
+    setVoiceText(text);
+    if (voiceTextTimer.current) clearTimeout(voiceTextTimer.current);
+    voiceTextTimer.current = setTimeout(() => setVoiceText(''), ms);
+  };
+
+  const applyIntent = useCallback(
+    (intent: VoiceIntent) => {
+      if (!device || Platform.OS === 'web') return;
+      const MOOD_ORDER: Mood[] = ['deep', 'flow', 'gentle']; // strongest → weakest
+      const curIdx = MOOD_ORDER.indexOf(moodRef.current);
+      if (intent.kind === 'stronger') {
+        const next = MOOD_ORDER[Math.max(0, curIdx - 1)];
+        setMood(next);
+        setPaused(false);
+        writeLevel(device, MOOD_TO_LEVEL[next]);
+      } else if (intent.kind === 'gentler') {
+        const next = MOOD_ORDER[Math.min(MOOD_ORDER.length - 1, curIdx + 1)];
+        setMood(next);
+        setPaused(false);
+        writeLevel(device, MOOD_TO_LEVEL[next]);
+      } else if (intent.kind === 'mood') {
+        setMood(intent.mood);
+        setPaused(false);
+        writeLevel(device, MOOD_TO_LEVEL[intent.mood]);
+      } else if (intent.kind === 'stop') {
+        writeLevel(device, OFF_LEVEL);
+        setPaused(true);
+      } else if (intent.kind === 'resume') {
+        writeLevel(device, MOOD_TO_LEVEL[moodRef.current]);
+        setPaused(false);
+      }
+    },
+    [device],
+  );
+
+  const handleToggleListen = useCallback(() => {
+    if (listening) {
+      stopVoiceSession();
+      setListening(false);
+      flashVoiceText('已停止聆听');
+    } else {
+      setListening(true);
+      flashVoiceText('正在聆听…', 3000);
+      startVoiceSession({
+        onPartial: (t) => flashVoiceText(t, 4000),
+        onFinal: (t, intent) => {
+          flashVoiceText(t, 2200);
+          if (intent) applyIntent(intent);
+        },
+        onError: (msg) => {
+          flashVoiceText('听不清: ' + msg, 2500);
+        },
+        onEnd: () => {
+          setListening(false);
+        },
+      });
+    }
+  }, [listening, applyIntent]);
+
+  useEffect(() => {
+    return () => {
+      stopVoiceSession();
+      if (voiceTextTimer.current) clearTimeout(voiceTextTimer.current);
+    };
+  }, []);
+
   const handleTogglePause = () => {
     if (!device || Platform.OS === 'web') return;
     if (paused) {
@@ -123,13 +207,27 @@ export default function ActiveScreen({ navigation }: any) {
           style={styles.topBtn}>
           <Text style={styles.topBtnText}>⚐ 我的</Text>
         </Pressable>
-        <Pressable onPress={handleTogglePause} style={styles.topBtn}>
-          <Text
-            style={[styles.topBtnText, paused && styles.topBtnTextActive]}>
-            {paused ? '▶ 继续' : '❚❚ 暂停'}
-          </Text>
-        </Pressable>
+        <View style={styles.topRight}>
+          <Pressable onPress={handleToggleListen} style={styles.topBtn}>
+            <Text
+              style={[styles.topBtnText, listening && styles.topBtnTextActive]}>
+              {listening ? '◉ 聆听中' : '◯ 聆听'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={handleTogglePause} style={styles.topBtn}>
+            <Text
+              style={[styles.topBtnText, paused && styles.topBtnTextActive]}>
+              {paused ? '▶ 继续' : '❚❚ 暂停'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
+
+      {voiceText ? (
+        <View style={styles.voiceOverlay} pointerEvents="none">
+          <Text style={styles.voiceText}>{voiceText}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.waveWrap}>
         <Wave width={372} height={240} getState={getWaveState} />
@@ -163,6 +261,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   topBtnTextActive: { color: colors.roseDeep, fontWeight: '600' },
+  topRight: { flexDirection: 'row', gap: 4 },
+  voiceOverlay: {
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 18,
+  },
+  voiceText: {
+    fontSize: 14,
+    color: colors.roseDeep,
+    letterSpacing: 1,
+    fontWeight: '500',
+  },
   close: {
     alignSelf: 'flex-start',
     marginTop: 4,

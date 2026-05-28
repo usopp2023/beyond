@@ -1,6 +1,22 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, ScrollView, Alert } from 'react-native';
 import { colors } from '../theme';
+import {
+  getActiveDevice,
+  setActiveDevice,
+  disconnect,
+  writeLevel,
+} from '../services/ble';
+import {
+  getStrengthCap,
+  setStrengthCap,
+  subscribeStrengthCap,
+  resetAllPrefs,
+  CAP_LABELS,
+  StrengthCap,
+} from '../services/prefs';
+
+const CAP_ORDER: StrengthCap[] = ['high', 'med', 'low'];
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -16,7 +32,65 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 
 export default function SettingsScreen({ navigation }: any) {
   const [localOnly, setLocalOnly] = useState(true);
-  const [faceId, setFaceId] = useState(false);
+  const [cap, setCap] = useState<StrengthCap>(getStrengthCap());
+  const [device, setDevice] = useState(getActiveDevice());
+
+  useEffect(() => {
+    const unsub = subscribeStrengthCap(setCap);
+    return unsub;
+  }, []);
+
+  const cycleCap = () => {
+    const idx = CAP_ORDER.indexOf(cap);
+    const next = CAP_ORDER[(idx + 1) % CAP_ORDER.length];
+    setStrengthCap(next);
+  };
+
+  const handleDevicePress = () => {
+    if (!device) {
+      navigation.replace('Connect');
+      return;
+    }
+    Alert.alert('断开连接', '断开后会回到连接页', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '断开',
+        style: 'destructive',
+        onPress: async () => {
+          try { writeLevel(device, 3); } catch {}
+          await disconnect(device);
+          setActiveDevice(null);
+          setDevice(null);
+          navigation.replace('Connect');
+        },
+      },
+    ]);
+  };
+
+  const handleClearAll = () => {
+    Alert.alert(
+      '清除所有数据',
+      '会断开设备、重置偏好设置，回到连接页。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '清除',
+          style: 'destructive',
+          onPress: async () => {
+            const d = getActiveDevice();
+            if (d) {
+              try { writeLevel(d, 3); } catch {}
+              await disconnect(d);
+              setActiveDevice(null);
+            }
+            resetAllPrefs();
+            setLocalOnly(true);
+            navigation.replace('Connect');
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <View style={styles.root}>
@@ -33,8 +107,21 @@ export default function SettingsScreen({ navigation }: any) {
         <View style={styles.group}>
           <Text style={styles.groupLabel}>设备</Text>
           <View style={styles.list}>
-            <Row icon="◍" title="你的设备" sub="已连接 · 电量 80%" right="›" />
-            <Row icon="⊙" title="震动强度上限" right="中等 ›" last />
+            <Row
+              icon="◍"
+              title="你的设备"
+              sub={device ? `已连接 · ${device.name ?? 'Vibration_Egg3'}` : '未连接'}
+              right={device ? '断开 ›' : '去连接 ›'}
+              onPress={handleDevicePress}
+            />
+            <Row
+              icon="⊙"
+              title="震动强度上限"
+              sub="拖动刻度盘和语音都会被限制在这个上限内"
+              right={`${CAP_LABELS[cap]} ›`}
+              onPress={cycleCap}
+              last
+            />
           </View>
         </View>
 
@@ -44,16 +131,17 @@ export default function SettingsScreen({ navigation }: any) {
             <Row
               icon="⊘"
               title="声音只在本地处理"
-              sub="永不上传,永不离开手机"
+              sub="即将上线"
               control={<Toggle on={localOnly} onToggle={() => setLocalOnly(!localOnly)} />}
+              disabled
             />
             <Row
-              icon="🔒"
-              title="打开 App 需要验证"
-              sub="用 Face ID 保护你的私密空间"
-              control={<Toggle on={faceId} onToggle={() => setFaceId(!faceId)} />}
+              icon="⊗"
+              title="清除所有数据"
+              right="›"
+              onPress={handleClearAll}
+              last
             />
-            <Row icon="⊗" title="清除所有数据" right="›" last />
           </View>
         </View>
 
@@ -70,6 +158,8 @@ function Row({
   right,
   control,
   last,
+  onPress,
+  disabled,
 }: {
   icon: string;
   title: string;
@@ -77,18 +167,23 @@ function Row({
   right?: string;
   control?: React.ReactNode;
   last?: boolean;
+  onPress?: () => void;
+  disabled?: boolean;
 }) {
+  const Container: any = onPress ? Pressable : View;
   return (
-    <View style={[styles.item, last && styles.itemLast]}>
+    <Container
+      onPress={onPress}
+      style={[styles.item, last && styles.itemLast, disabled && styles.itemDisabled]}>
       <View style={styles.itemLeft}>
         <Text style={styles.itemIcon}>{icon}</Text>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.itemTitle}>{title}</Text>
           {sub && <Text style={styles.itemSub}>{sub}</Text>}
         </View>
       </View>
       {control ?? (right && <Text style={styles.itemRight}>{right}</Text>)}
-    </View>
+    </Container>
   );
 }
 
@@ -132,6 +227,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.lineSoft,
   },
   itemLast: { borderBottomWidth: 0 },
+  itemDisabled: { opacity: 0.45 },
   itemLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   itemIcon: { fontSize: 16, width: 22, textAlign: 'center', color: colors.ink },
   itemTitle: { fontSize: 14, color: colors.ink, fontWeight: '500' },
