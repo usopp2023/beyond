@@ -12,7 +12,6 @@ import {
 import Wave from '../components/Wave';
 import Dial, { Mood } from '../components/Dial';
 import StageDots from '../components/StageDots';
-import PerceptionLine from '../components/PerceptionLine';
 import {
   startVoiceSession,
   stopVoiceSession,
@@ -29,11 +28,16 @@ import {
 
 // Firmware uses inverted levels: 0=HIGH(strongest), 1=MED, 2=LOW, 3=OFF.
 const MOOD_TO_LEVEL: Record<Mood, 0 | 1 | 2 | 3> = {
-  gentle: 2,
-  flow: 1,
   deep: 0,
+  flow: 1,
+  gentle: 2,
+  off: 3,
 };
 const OFF_LEVEL = 3;
+
+function levelToMood(lv: 0 | 1 | 2 | 3): Mood {
+  return lv === 0 ? 'deep' : lv === 1 ? 'flow' : lv === 2 ? 'gentle' : 'off';
+}
 const MAX_FSR = 4095;
 
 function levelToStrength(level: number): number {
@@ -46,17 +50,18 @@ export default function ActiveScreen({ navigation }: any) {
   const [telemetry, setTelemetry] = useState<Telemetry>({});
   const [paused, setPaused] = useState(false);
   const [listening, setListening] = useState(false);
-  const [voiceText, setVoiceText] = useState<string>('');
   const [aiOn, setAiOn] = useState(false);
   const [aiFrame, setAiFrame] = useState<AIFrame | null>(null);
   const aiTickRef = useRef(0);
   const aiTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const voiceTextTimer = useRef<NodeJS.Timeout | null>(null);
   // Keep latest mood/paused accessible inside voice handler without recreating it.
   const moodRef = useRef<Mood>('gentle');
   const pausedRef = useRef(false);
+  // Last non-off mood — used to restore on "继续" / resume after stop.
+  const prevMoodRef = useRef<Mood>('gentle');
   useEffect(() => {
     moodRef.current = mood;
+    if (mood !== 'off') prevMoodRef.current = mood;
   }, [mood]);
   useEffect(() => {
     pausedRef.current = paused;
@@ -152,16 +157,11 @@ export default function ActiveScreen({ navigation }: any) {
     [device],
   );
 
-  const flashVoiceText = (text: string, ms = 1800) => {
-    setVoiceText(text);
-    if (voiceTextTimer.current) clearTimeout(voiceTextTimer.current);
-    voiceTextTimer.current = setTimeout(() => setVoiceText(''), ms);
-  };
-
   const applyIntent = useCallback(
     (intent: VoiceIntent) => {
       if (!device || Platform.OS === 'web') return;
-      const MOOD_ORDER: Mood[] = ['deep', 'flow', 'gentle']; // strongest → weakest
+      // Strongest → weakest. 'off' included so 'gentler' can step into stop.
+      const MOOD_ORDER: Mood[] = ['deep', 'flow', 'gentle', 'off'];
       const curIdx = MOOD_ORDER.indexOf(moodRef.current);
       if (intent.kind === 'stronger') {
         const next = MOOD_ORDER[Math.max(0, curIdx - 1)];
@@ -178,10 +178,14 @@ export default function ActiveScreen({ navigation }: any) {
         setPaused(false);
         writeLevel(device, MOOD_TO_LEVEL[intent.mood]);
       } else if (intent.kind === 'stop') {
+        setMood('off');
         writeLevel(device, OFF_LEVEL);
         setPaused(true);
       } else if (intent.kind === 'resume') {
-        writeLevel(device, MOOD_TO_LEVEL[moodRef.current]);
+        const target =
+          moodRef.current === 'off' ? prevMoodRef.current : moodRef.current;
+        setMood(target);
+        writeLevel(device, MOOD_TO_LEVEL[target]);
         setPaused(false);
       }
     },
@@ -192,19 +196,16 @@ export default function ActiveScreen({ navigation }: any) {
     if (listening) {
       stopVoiceSession();
       setListening(false);
-      flashVoiceText('已停止聆听');
     } else {
       setListening(true);
-      flashVoiceText('正在聆听…', 3000);
       startVoiceSession({
-        onPartial: (t) => flashVoiceText(t, 4000),
+        onPartial: () => {},
         onFinal: (t, intent) => {
-          flashVoiceText(t, 2200);
           recentSpeechRef.current = { text: t, t: Date.now() };
           if (intent) applyIntent(intent);
         },
         onError: (msg) => {
-          flashVoiceText('听不清: ' + msg, 2500);
+          console.warn('[Voice] error:', msg);
         },
         onEnd: () => {
           setListening(false);
@@ -216,7 +217,6 @@ export default function ActiveScreen({ navigation }: any) {
   useEffect(() => {
     return () => {
       stopVoiceSession();
-      if (voiceTextTimer.current) clearTimeout(voiceTextTimer.current);
       if (aiTimerRef.current) clearInterval(aiTimerRef.current);
     };
   }, []);
@@ -316,6 +316,8 @@ export default function ActiveScreen({ navigation }: any) {
       }
       lastFrameRef.current = frame;
       setAiFrame(frame);
+      const aiMood = levelToMood(frame.level);
+      setMood(aiMood);
       if (device && Platform.OS !== 'web') {
         writeLevel(device, frame.level);
       }
@@ -378,16 +380,6 @@ export default function ActiveScreen({ navigation }: any) {
       </View>
 
       <StageDots stage={aiOn ? (aiFrame?.stage ?? null) : null} />
-      <PerceptionLine
-        perception={aiOn ? (aiFrame?.perception ?? null) : null}
-        intention={aiOn ? (aiFrame?.intention ?? null) : null}
-      />
-
-      {voiceText ? (
-        <View style={styles.voiceOverlay} pointerEvents="none">
-          <Text style={styles.voiceText}>{voiceText}</Text>
-        </View>
-      ) : null}
 
       <View style={styles.waveWrap}>
         <Wave width={372} height={240} getState={getWaveState} />

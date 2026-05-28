@@ -75,6 +75,26 @@ export type VoiceCallbacks = {
 };
 
 let listeners: { remove: () => void }[] = [];
+// True between startVoiceSession() and stopVoiceSession(). When the native
+// recognizer fires 'end' (Android stops after each utterance) we auto-restart
+// while this flag is true, so the UI sees one continuous session.
+let keepAlive = false;
+let restartCb: VoiceCallbacks | null = null;
+
+function startNative() {
+  try {
+    console.log('[Voice] calling start()');
+    ExpoSpeechRecognitionModule.start({
+      lang: 'zh-CN',
+      interimResults: true,
+      continuous: true,
+      maxAlternatives: 1,
+    });
+  } catch (e: any) {
+    console.warn('[Voice] start threw:', e?.message ?? e);
+    restartCb?.onError?.('启动失败: ' + (e?.message ?? e));
+  }
+}
 
 export async function startVoiceSession(cb: VoiceCallbacks): Promise<void> {
   console.log('[Voice] startVoiceSession');
@@ -91,10 +111,9 @@ export async function startVoiceSession(cb: VoiceCallbacks): Promise<void> {
     return;
   }
 
-  // Do NOT preemptively abort here — the abort event arrives asynchronously
-  // and would be caught by our freshly-attached error listener, masquerading
-  // as a startup failure. The UI flow already prevents overlapping sessions.
   cleanup();
+  keepAlive = true;
+  restartCb = cb;
 
   listeners = [
     listen('result', (event: any) => {
@@ -112,36 +131,44 @@ export async function startVoiceSession(cb: VoiceCallbacks): Promise<void> {
       const code = event?.error ?? 'unknown';
       const msg = event?.message ?? '';
       console.warn(`[Voice] error code=${code} msg=${msg}`);
-      cb.onError?.(`${code}${msg ? ' / ' + msg : ''}`);
+      // Don't surface "no-speech" / "no-match" as user-visible errors — they
+      // happen whenever the user pauses between phrases.
+      if (code !== 'no-speech' && code !== 'no-match') {
+        cb.onError?.(`${code}${msg ? ' / ' + msg : ''}`);
+      }
     }),
     listen('start', () => {
       console.log('[Voice] start event');
     }),
     listen('end', () => {
-      console.log('[Voice] end event');
-      cb.onEnd?.();
+      console.log('[Voice] end event, keepAlive=', keepAlive);
+      if (keepAlive) {
+        // Android's recognizer auto-stops after each utterance. Restart it
+        // after a tiny delay so the native side has fully released the mic.
+        setTimeout(() => {
+          if (keepAlive) startNative();
+        }, 250);
+      } else {
+        cb.onEnd?.();
+      }
     }),
   ];
 
-  try {
-    console.log('[Voice] calling start()');
-    ExpoSpeechRecognitionModule.start({
-      lang: 'zh-CN',
-      interimResults: true,
-      continuous: true,
-      maxAlternatives: 1,
-    });
-  } catch (e: any) {
-    console.warn('[Voice] start threw:', e?.message ?? e);
-    cb.onError?.('启动失败: ' + (e?.message ?? e));
-  }
+  startNative();
 }
 
 export function stopVoiceSession(): void {
+  keepAlive = false;
   try {
     ExpoSpeechRecognitionModule.stop();
   } catch {}
-  cleanup();
+  // Give the recognizer a moment to emit its final 'end' before we drop the
+  // listeners, so we don't accidentally surface a stale error.
+  setTimeout(() => {
+    cleanup();
+    restartCb?.onEnd?.();
+    restartCb = null;
+  }, 200);
 }
 
 function cleanup() {

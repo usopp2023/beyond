@@ -4,20 +4,35 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
+  withTiming,
+  Easing,
   runOnJS,
 } from 'react-native-reanimated';
 import { colors } from '../theme';
 
-export type Mood = 'gentle' | 'flow' | 'deep';
+export type Mood = 'deep' | 'flow' | 'gentle' | 'off';
 
 const MOOD_LABEL: Record<Mood, string> = {
-  gentle: '轻柔',
-  flow: '流动',
   deep: '深沉',
+  flow: '流动',
+  gentle: '轻柔',
+  off: '静止',
 };
-const MOOD_HOME: Record<Mood, number> = { gentle: 150, flow: 90, deep: 30 };
-const MOOD_ROTATE: Record<Mood, number> = { gentle: 60, flow: 0, deep: -60 };
+// Arc positions on the wheel (math angle, 0° = 3 o'clock, CCW positive).
+// Order from "strong" to "still": deep → flow → gentle → off, evenly 60° apart.
+const MOOD_HOME: Record<Mood, number> = {
+  deep: 30,
+  flow: 90,
+  gentle: 150,
+  off: 210,
+};
+// CSS rotate value that brings each label under the top marker (12 o'clock).
+const MOOD_ROTATE: Record<Mood, number> = {
+  deep: -60,
+  flow: 0,
+  gentle: 60,
+  off: 120,
+};
 
 const W = 300;
 const VISIBLE_H = 150;
@@ -33,27 +48,21 @@ function polar(angleDeg: number, radius: number) {
   return { x: CX + Math.cos(a) * radius, y: CY - Math.sin(a) * radius };
 }
 
-// Snap helpers — must be 'worklet' so they can run on UI thread.
-function nearestMoodRotation(value: number): number {
-  'worklet';
-  const opts = [MOOD_ROTATE.gentle, MOOD_ROTATE.flow, MOOD_ROTATE.deep];
-  let best = opts[0];
-  let bestDiff = Math.abs(value - best);
-  for (let i = 1; i < opts.length; i++) {
-    const d = Math.abs(value - opts[i]);
-    if (d < bestDiff) {
-      bestDiff = d;
-      best = opts[i];
-    }
-  }
-  return best;
-}
-
 function rotationToMood(r: number): Mood {
   'worklet';
+  if (r >= 90) return 'off';
   if (r >= 30) return 'gentle';
-  if (r <= -30) return 'deep';
-  return 'flow';
+  if (r >= -30) return 'flow';
+  return 'deep';
+}
+
+// JS-thread mirror (no worklet directive) — used by the external sync effect
+// which runs on the JS thread.
+function rotationToMoodJS(r: number): Mood {
+  if (r >= 90) return 'off';
+  if (r >= 30) return 'gentle';
+  if (r >= -30) return 'flow';
+  return 'deep';
 }
 
 type Props = {
@@ -69,10 +78,23 @@ export default function Dial({ mood, onChange }: Props) {
   const lastReportedMood = useSharedValue<Mood>(mood);
   const [activeMood, setActiveMood] = useState<Mood>(mood);
 
-  // Intentionally no external→rotation sync effect: the Dial is fully
-  // user-controlled. Parent's `mood` prop only seeds the initial position
-  // (via useSharedValue above). After that, only the gesture moves the wheel
-  // — so committing a mood doesn't yank the dial to the notch center.
+  // External-source sync: when parent's `mood` prop changes AND the current
+  // wheel rotation does not already correspond to that mood's zone, an
+  // external command (voice / AI / pause-release) caused the change — animate
+  // the wheel to that mood's home rotation. When the gesture itself produced
+  // the change, the rotation is already in the right zone and we skip animation
+  // (preserving the "no snap-back on release" behavior).
+  useEffect(() => {
+    const zone = rotationToMoodJS(rotation.value);
+    if (zone !== mood) {
+      rotation.value = withTiming(MOOD_ROTATE[mood], {
+        duration: 450,
+        easing: Easing.out(Easing.cubic),
+      });
+      lastReportedMood.value = mood;
+      setActiveMood(mood);
+    }
+  }, [mood]);
 
   const setActiveMoodJS = (m: Mood) => setActiveMood(m);
   const emitChange = (m: Mood) => onChange(m);
@@ -97,7 +119,7 @@ export default function Dial({ mood, onChange }: Props) {
           const cur = (Math.atan2(vy - CY, vx - CX) * 180) / Math.PI;
           let next = startRotation.value - (cur - startAngle.value);
           if (next < MOOD_ROTATE.deep - 25) next = MOOD_ROTATE.deep - 25;
-          if (next > MOOD_ROTATE.gentle + 25) next = MOOD_ROTATE.gentle + 25;
+          if (next > MOOD_ROTATE.off + 25) next = MOOD_ROTATE.off + 25;
           rotation.value = next;
           // Only cross the worklet→JS boundary when the active mood label
           // actually changes (boundary cross), not every frame.
@@ -132,7 +154,7 @@ export default function Dial({ mood, onChange }: Props) {
       rotate: number;
     }[] = [];
     for (let deg = -90; deg <= 270; deg += TICK_STEP) {
-      const isGear = [30, 90, 150].some((h) => Math.abs(deg - h) < 3);
+      const isGear = [30, 90, 150, 210].some((h) => Math.abs(deg - h) < 3);
       const rIn = isGear ? R_INNER - 7 : R_INNER;
       const thickness = isGear ? 3.5 : 2;
       const length = R_OUTER - rIn;
@@ -152,7 +174,7 @@ export default function Dial({ mood, onChange }: Props) {
 
   const labels = useMemo(
     () =>
-      (['gentle', 'flow', 'deep'] as Mood[]).map((m) => {
+      (['deep', 'flow', 'gentle', 'off'] as Mood[]).map((m) => {
         const p = polar(MOOD_HOME[m], R_INNER - 22);
         return { m, x: p.x, y: p.y, text: MOOD_LABEL[m] };
       }),
