@@ -29,6 +29,48 @@ export function getActiveDevice(): Device | null {
   return activeDevice;
 }
 
+// ─────────────────────────── Simulation mode ───────────────────────────────
+// When simMode is true, there is no real BLE connection. subscribeTelemetry
+// fakes a 5 Hz Telemetry stream following a canned arousal-like FSR curve,
+// and writeLevel just updates a module-local "virtual motor level" that the
+// telemetry stream echoes back so the Wave / dial follow naturally.
+let simMode = false;
+let simMotorLevel: 0 | 1 | 2 | 3 = 3;
+let simStartedAt = 0;
+export function setSimMode(on: boolean) {
+  simMode = on;
+  if (on) {
+    simStartedAt = Date.now();
+    simMotorLevel = 3;
+  }
+}
+export function isSimMode(): boolean {
+  return simMode;
+}
+
+// Canned FSR curve, t in seconds since sim started. Output: 0..4095.
+function simFsr(t: number): number {
+  const cycle = t % 60; // loop every 60s so demos can run repeatedly
+  if (cycle < 10) {
+    // 散乱、低 — bursts up to ~10%
+    return Math.random() < 0.3 ? 200 + Math.random() * 250 : Math.random() * 120;
+  }
+  if (cycle < 30) {
+    // 稳定中等 — ~35% with small noise
+    return 1400 + Math.random() * 250;
+  }
+  if (cycle < 50) {
+    // 节律 + 攀升 — sin envelope rising from mid to high
+    const ramp = (cycle - 30) / 20; // 0..1
+    const base = 1500 + ramp * 1500;
+    const osc = Math.sin((cycle - 30) * 1.2) * 600;
+    return Math.max(0, Math.min(4095, base + osc));
+  }
+  // 50-60s 回落
+  const decay = 1 - (cycle - 50) / 10;
+  return Math.max(0, 1800 * decay + Math.random() * 200);
+}
+
 export async function requestAndroidPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
   const apiLevel = Platform.Version as number;
@@ -80,10 +122,24 @@ export async function connectAndPrepare(device: Device): Promise<Device> {
 }
 
 export function subscribeTelemetry(
-  device: Device,
+  device: Device | null,
   onData: (t: Telemetry) => void,
   onError?: (err: Error) => void,
 ): Subscription {
+  if (!device && simMode) {
+    console.log('[SIM] subscribeTelemetry');
+    const handle = setInterval(() => {
+      const t = (Date.now() - simStartedAt) / 1000;
+      const fsr = Math.round(simFsr(t));
+      const fsrLevel = fsr > 2500 ? 0 : fsr > 1200 ? 1 : fsr > 400 ? 2 : 3;
+      onData({ fsr, fsrLevel, motorLevel: simMotorLevel });
+    }, 200);
+    return { remove: () => clearInterval(handle) } as Subscription;
+  }
+  if (!device) {
+    console.warn('[BLE] subscribeTelemetry called with null device & no sim');
+    return { remove: () => {} } as Subscription;
+  }
   console.log('[BLE] subscribeTelemetry → attaching monitor');
   let pktCnt = 0;
   return device.monitorCharacteristicForService(
@@ -131,7 +187,13 @@ export async function writeCommand(device: Device, command: string): Promise<voi
 //   '0' = 0x30 = "MA==" , '1' = "MQ==" , '2' = "Mg==" , '3' = "Mw=="
 const LEVEL_B64 = ['MA==', 'MQ==', 'Mg==', 'Mw=='] as const;
 
-export function writeLevel(device: Device, level: 0 | 1 | 2 | 3): void {
+export function writeLevel(device: Device | null, level: 0 | 1 | 2 | 3): void {
+  if (!device && simMode) {
+    simMotorLevel = level;
+    console.log(`[SIM] writeLevel ${level}`);
+    return;
+  }
+  if (!device) return;
   console.log(`[BLE-FAF] writeLevel ${level}`);
   device
     .writeCharacteristicWithoutResponseForService(
@@ -143,7 +205,11 @@ export function writeLevel(device: Device, level: 0 | 1 | 2 | 3): void {
     .catch((e: any) => console.warn(`[BLE-FAF] writeLevel ${level} ERR:`, e?.message ?? e));
 }
 
-export async function disconnect(device: Device): Promise<void> {
+export async function disconnect(device: Device | null): Promise<void> {
+  if (!device) {
+    simMode = false;
+    return;
+  }
   try {
     await device.cancelConnection();
   } catch {}

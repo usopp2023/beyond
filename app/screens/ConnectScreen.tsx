@@ -15,6 +15,7 @@ import {
   scanForDevice,
   connectAndPrepare,
   setActiveDevice,
+  setSimMode,
   DEVICE_NAME,
 } from '../services/ble';
 import type { Device } from 'react-native-ble-plx';
@@ -172,6 +173,18 @@ export default function ConnectScreen({ navigation }: any) {
         )}
 
         <View style={{ flex: 1 }} />
+
+        <Pressable
+          style={styles.simBtn}
+          onPress={() => {
+            stopScanRef.current?.();
+            setActiveDevice(null);
+            setSimMode(true);
+            navigation.navigate('Active');
+          }}>
+          <Text style={styles.simBtnText}>无设备 · 模拟演示</Text>
+        </Pressable>
+
         <Text style={styles.privacyNote}>
           连接是私密的。你的声音只在这台手机上处理,{'\n'}不会上传,不会离开你。
         </Text>
@@ -270,6 +283,22 @@ const styles = StyleSheet.create({
     color: '#b85a5a',
     fontSize: 12,
     textAlign: 'center',
+  },
+  simBtn: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: 'transparent',
+    marginBottom: 4,
+  },
+  simBtnText: {
+    fontSize: 12,
+    color: colors.inkDim,
+    letterSpacing: 3,
+    fontWeight: '500',
   },
   privacyNote: {
     textAlign: 'center',

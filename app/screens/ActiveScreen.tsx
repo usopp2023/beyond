@@ -7,6 +7,7 @@ import {
   disconnect,
   getActiveDevice,
   setActiveDevice,
+  isSimMode,
   Telemetry,
 } from '../services/ble';
 import Wave from '../components/Wave';
@@ -46,6 +47,11 @@ function levelToStrength(level: number): number {
 
 export default function ActiveScreen({ navigation }: any) {
   const device = getActiveDevice();
+  // Sim mode: no real BLE device, but ble.ts emulates telemetry + writeLevel.
+  // All downstream guards now check `active` instead of `device` so the demo
+  // flow works identically.
+  const sim = isSimMode();
+  const active = !!device || sim;
   const [mood, setMood] = useState<Mood>('gentle');
   const [telemetry, setTelemetry] = useState<Telemetry>({});
   const [paused, setPaused] = useState(false);
@@ -91,11 +97,11 @@ export default function ActiveScreen({ navigation }: any) {
   }, []);
 
   useEffect(() => {
-    if (Platform.OS === 'web' || !device) {
+    if (Platform.OS === 'web' || !active) {
       console.log('[Active] no device (web or null)');
       return;
     }
-    console.log('[Active] mounted with device:', device.id);
+    console.log('[Active] mounted; device:', device?.id ?? '(sim)');
     let logCnt = 0;
     const sub = subscribeTelemetry(device, (t) => {
       setTelemetry(t);
@@ -139,7 +145,7 @@ export default function ActiveScreen({ navigation }: any) {
   }, [device]);
 
   useEffect(() => {
-    if (!device || Platform.OS === 'web') return;
+    if (!active || Platform.OS === 'web') return;
     const t = setTimeout(() => {
       writeLevel(device, MOOD_TO_LEVEL.gentle);
     }, 300);
@@ -150,16 +156,16 @@ export default function ActiveScreen({ navigation }: any) {
     (m: Mood) => {
       setMood(m);
       setPaused((p) => (p ? false : p)); // dragging the dial auto-resumes
-      if (device && Platform.OS !== 'web') {
+      if (active && Platform.OS !== 'web') {
         writeLevel(device, MOOD_TO_LEVEL[m]);
       }
     },
-    [device],
+    [device, active],
   );
 
   const applyIntent = useCallback(
     (intent: VoiceIntent) => {
-      if (!device || Platform.OS === 'web') return;
+      if (!active || Platform.OS === 'web') return;
       // Strongest → weakest. 'off' included so 'gentler' can step into stop.
       const MOOD_ORDER: Mood[] = ['deep', 'flow', 'gentle', 'off'];
       const curIdx = MOOD_ORDER.indexOf(moodRef.current);
@@ -189,7 +195,7 @@ export default function ActiveScreen({ navigation }: any) {
         setPaused(false);
       }
     },
-    [device],
+    [device, active],
   );
 
   const handleToggleListen = useCallback(() => {
@@ -286,14 +292,20 @@ export default function ActiveScreen({ navigation }: any) {
     };
   }, []);
 
+  // Shut down the AI loop. Used both when the user toggles ✦ AI off and when
+  // 暂停 acts as the master kill switch.
+  const stopAi = useCallback(() => {
+    if (aiTimerRef.current) clearInterval(aiTimerRef.current);
+    aiTimerRef.current = null;
+    aiInFlightRef.current = false;
+    lastFrameRef.current = null;
+    setAiOn(false);
+    setAiFrame(null);
+  }, []);
+
   const handleToggleAi = useCallback(() => {
     if (aiOn) {
-      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
-      aiTimerRef.current = null;
-      aiInFlightRef.current = false;
-      lastFrameRef.current = null;
-      setAiOn(false);
-      setAiFrame(null);
+      stopAi();
       return;
     }
     setAiOn(true);
@@ -303,6 +315,7 @@ export default function ActiveScreen({ navigation }: any) {
 
     const tick = async () => {
       if (aiInFlightRef.current) return; // skip if previous still running
+      if (pausedRef.current) return;     // hard halt while paused
       aiInFlightRef.current = true;
       const input = buildInput();
       console.log('[AI] input:', JSON.stringify(input));
@@ -314,11 +327,16 @@ export default function ActiveScreen({ navigation }: any) {
         console.warn('[AI] grok failed, falling back to mock:', e?.message ?? e);
         frame = mockNextFrame(aiTickRef.current);
       }
+      // Pause may have flipped during the in-flight request — re-check.
+      if (pausedRef.current) {
+        aiInFlightRef.current = false;
+        return;
+      }
       lastFrameRef.current = frame;
       setAiFrame(frame);
       const aiMood = levelToMood(frame.level);
       setMood(aiMood);
-      if (device && Platform.OS !== 'web') {
+      if (active && Platform.OS !== 'web') {
         writeLevel(device, frame.level);
       }
       aiTickRef.current = (aiTickRef.current + 1) % MOCK_LEN;
@@ -326,22 +344,25 @@ export default function ActiveScreen({ navigation }: any) {
     };
     tick();
     aiTimerRef.current = setInterval(tick, 2500);
-  }, [aiOn, device, buildInput]);
+  }, [aiOn, device, active, buildInput, stopAi]);
 
   const handleTogglePause = () => {
-    if (!device || Platform.OS === 'web') return;
+    if (!active || Platform.OS === 'web') return;
     if (paused) {
-      // Resume: re-send current mood's level.
+      // Resume: re-send current mood's level. AI stays off — the user can
+      // re-enable it explicitly via ✦ AI if they want.
       writeLevel(device, MOOD_TO_LEVEL[mood]);
       setPaused(false);
     } else {
+      // Master kill: stop AI loop too. Pause is the highest priority.
+      stopAi();
       writeLevel(device, OFF_LEVEL);
       setPaused(true);
     }
   };
 
   const handleClose = async () => {
-    if (device && Platform.OS !== 'web') {
+    if (active && Platform.OS !== 'web') {
       writeLevel(device, OFF_LEVEL);
       await disconnect(device);
       setActiveDevice(null);
@@ -352,11 +373,16 @@ export default function ActiveScreen({ navigation }: any) {
   return (
     <View style={styles.root}>
       <View style={styles.topBar}>
-        <Pressable
-          onPress={() => navigation.navigate('Settings')}
-          style={styles.topBtn}>
-          <Text style={styles.topBtnText}>⚐ 我的</Text>
-        </Pressable>
+        <View style={styles.topLeft}>
+          <Pressable onPress={handleClose} style={styles.topBtn}>
+            <Text style={styles.topBtnText}>←</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => navigation.navigate('Settings')}
+            style={styles.topBtn}>
+            <Text style={styles.topBtnText}>⚐ 我的</Text>
+          </Pressable>
+        </View>
         <View style={styles.topRight}>
           <Pressable onPress={handleToggleAi} style={styles.topBtn}>
             <Text
@@ -413,6 +439,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   topBtnTextActive: { color: colors.roseDeep, fontWeight: '600' },
+  topLeft: { flexDirection: 'row', gap: 0 },
   topRight: { flexDirection: 'row', gap: 4 },
   voiceOverlay: {
     alignItems: 'center',
